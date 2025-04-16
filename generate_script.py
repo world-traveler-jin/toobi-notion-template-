@@ -1,59 +1,116 @@
 
 import os
-import openai
 import requests
-from datetime import datetime
+import openai
 from dotenv import load_dotenv
+from datetime import datetime
+from notion_client import Client as NotionClient
 
+# Load environment variables
 load_dotenv()
-
 openai.api_key = os.getenv("OPENAI_API_KEY")
-NOTION_TOKEN = os.getenv("NOTION_TOKEN")
-DATABASE_ID = os.getenv("NOTION_DATABASE_ID")
+notion = NotionClient(auth=os.getenv("NOTION_TOKEN"))
+NOTION_DB_ID = os.getenv("NOTION_DATABASE_ID")
+ELEVEN_API_KEY = os.getenv("ELEVENLABS_API_KEY")
 
-prompt = (
-    """
-아이들을 위한 에피소드 제목과 캐릭터별 대사를 작성해줘.
+# 캐릭터별 목소리 매핑
+CHARACTER_VOICES = {
+    "뚜비": "21m00Tcm4TlvDq8ikWAM",   # Josh
+    "피코": "EXAVITQu4vr4xnSDxMaL",  # Rachel
+    "뽀요": "MF3mGyEYCl7XYWbV9V6O",   # Bella
+}
+
+def create_script_prompt():
+    return """아이들을 위한 에피소드 제목과 캐릭터별 대사를 작성해줘.
 형식은 다음과 같이:
-제목: ...
+제목: 무지개 숲에서 길을 잃은 뚜비
 대본:
-뚜비: ...
-피코: ...
-뽀요: ...
+뚜비: 여기가 어디지...? 길을 잃은 것 같아.
+피코: 걱정 마! 내가 지도를 봐줄게!
+뽀요: 먼저 침착해야 해. 우리 같이 해결해보자!
 """
-)
 
-response = openai.ChatCompletion.create(
-    model="gpt-3.5-turbo",
-    messages=[
-        {"role": "system", "content": "너는 어린이 애니메이션 시나리오 작가야."},
-        {"role": "user", "content": prompt}
-    ]
-)
+def generate_script():
+    response = openai.ChatCompletion.create(
+        model="gpt-4",
+        messages=[
+            {"role": "system", "content": "너는 어린이 애니메이션 시나리오 작가야."},
+            {"role": "user", "content": create_script_prompt()}
+        ]
+    )
+    return response["choices"][0]["message"]["content"]
 
-gpt_reply = response['choices'][0]['message']['content']
-lines = gpt_reply.splitlines()
-title_line = next((line for line in lines if line.startswith("제목:")), "제목: 알 수 없음")
-title = title_line.replace("제목:", "").strip()
-script_text = "\n".join(line for line in lines if not line.startswith("제목:")).strip()
+def parse_script(gpt_output):
+    lines = gpt_output.strip().split("\n")
+    title = ""
+    lines_dict = {}
+    for line in lines:
+        if line.startswith("제목:"):
+            title = line.replace("제목:", "").strip()
+        elif ":" in line:
+            character, dialogue = line.split(":", 1)
+            character = character.strip()
+            dialogue = dialogue.strip()
+            if character in CHARACTER_VOICES:
+                lines_dict.setdefault(character, []).append(dialogue)
+    return title, lines_dict
 
-notion_url = "https://api.notion.com/v1/pages"
-headers = {
-    "Authorization": f"Bearer {NOTION_TOKEN}",
-    "Content-Type": "application/json",
-    "Notion-Version": "2022-06-28"
-}
-
-today = datetime.now().strftime("%Y-%m-%d")
-data = {
-    "parent": {"database_id": DATABASE_ID},
-    "properties": {
-        "에피소드 제목": {"title": [{"text": {"content": title}}]},
-        "대본": {"rich_text": [{"text": {"content": script_text}}]},
-        "상태": {"select": {"name": "대본 완료"}},
-        "생성 날짜": {"date": {"start": today}}
+def tts_generate(character, texts):
+    voice_id = CHARACTER_VOICES[character]
+    full_text = " ".join(texts)
+    url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
+    headers = {
+        "xi-api-key": ELEVEN_API_KEY,
+        "Content-Type": "application/json"
     }
-}
+    data = {
+        "text": full_text,
+        "voice_settings": {
+            "stability": 0.5,
+            "similarity_boost": 0.7
+        }
+    }
 
-res = requests.post(notion_url, headers=headers, json=data)
-print("노션 등록 완료!" if res.status_code == 200 else f"실패: {res.text}")
+    response = requests.post(url, headers=headers, json=data)
+    if response.status_code != 200:
+        print(f"[{character}] 음성 생성 실패: {response.text}")
+        return None
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M")
+    filename = f"audio/{character}_{timestamp}.mp3"
+    with open(filename, "wb") as f:
+        f.write(response.content)
+
+    return f"https://{os.getenv("PYTHONANYWHERE_USERNAME")}.pythonanywhere.com/{filename}"
+
+def create_notion_card(title, voice_links):
+    timestamp = datetime.now().isoformat()
+    notion.pages.create(
+        parent={"database_id": NOTION_DB_ID},
+        properties={
+            "에피소드 제목": {"title": [{"text": {"content": title}}]},
+            "대본": {"rich_text": [{"text": {"content": "자동 생성됨"}}]},
+            "상태": {"select": {"name": "대본 생성됨"}},
+            "생성 날짜": {"date": {"start": timestamp}},
+            "음성 링크": {"url": voice_links[0] if voice_links else ""}
+        }
+    )
+
+def main():
+    print("▶ GPT 대본 생성 중...")
+    script = generate_script()
+    title, parsed = parse_script(script)
+
+    print("▶ 캐릭터별 음성 생성 중...")
+    voice_links = []
+    for character, lines in parsed.items():
+        url = tts_generate(character, lines)
+        if url:
+            voice_links.append(url)
+
+    print("▶ 노션 카드 생성 중...")
+    create_notion_card(title, voice_links)
+    print("✅ 완료! 자동 생성된 카드가 노션에 추가됐습니다.")
+
+if __name__ == "__main__":
+    main()
