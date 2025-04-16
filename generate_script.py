@@ -2,6 +2,8 @@
 import os
 import requests
 import openai
+import json
+import random
 from dotenv import load_dotenv
 from datetime import datetime
 from notion_client import Client as NotionClient
@@ -14,12 +16,24 @@ NOTION_DB_ID = os.getenv("NOTION_DATABASE_ID")
 ELEVEN_API_KEY = os.getenv("ELEVENLABS_API_KEY")
 USERNAME = os.getenv("PYTHONANYWHERE_USERNAME")
 
-# 캐릭터별 목소리 매핑
-CHARACTER_VOICES = {
-    "뚜비": "21m00Tcm4TlvDq8ikWAM",
-    "피코": "EXAVITQu4vr4xnSDxMaL",
-    "뽀요": "MF3mGyEYCl7XYWbV9V6O"
-}
+# 기본 음성 목록 (무료 공개 보이스 기준)
+DEFAULT_VOICES = [
+    "21m00Tcm4TlvDq8ikWAM",  # Josh
+    "EXAVITQu4vr4xnSDxMaL",  # Rachel
+    "MF3mGyEYCl7XYWbV9V6O"   # Bella
+]
+
+VOICE_MAP_FILE = "audio/voices.json"
+
+def load_voice_mapping():
+    if os.path.exists(VOICE_MAP_FILE):
+        with open(VOICE_MAP_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return {}
+
+def save_voice_mapping(mapping):
+    with open(VOICE_MAP_FILE, "w", encoding="utf-8") as f:
+        json.dump(mapping, f, ensure_ascii=False, indent=2)
 
 def log_error(message):
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
@@ -57,12 +71,15 @@ def parse_script(gpt_output):
             character, dialogue = line.split(":", 1)
             character = character.strip()
             dialogue = dialogue.strip()
-            if character in CHARACTER_VOICES:
-                lines_dict.setdefault(character, []).append(dialogue)
+            lines_dict.setdefault(character, []).append(dialogue)
     return title, lines_dict
 
-def tts_generate(character, texts):
-    voice_id = CHARACTER_VOICES[character]
+def assign_voice(character, mapping):
+    if character not in mapping:
+        mapping[character] = random.choice(DEFAULT_VOICES)
+    return mapping[character]
+
+def tts_generate(character, texts, voice_id):
     full_text = " ".join(texts)
     url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
     headers = {
@@ -110,10 +127,13 @@ def main():
 
     print("▶ 캐릭터별 음성 생성 중...")
     voice_links = []
+    voice_mapping = load_voice_mapping()
     for character, lines in parsed.items():
-        url = tts_generate(character, lines)
+        voice_id = assign_voice(character, voice_mapping)
+        url = tts_generate(character, lines, voice_id)
         if url:
             voice_links.append(url)
+    save_voice_mapping(voice_mapping)
 
     print("▶ 노션 카드 생성 중...")
     create_notion_card(title, script, voice_links)
