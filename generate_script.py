@@ -16,9 +16,9 @@ USERNAME = os.getenv("PYTHONANYWHERE_USERNAME")
 
 # 캐릭터별 목소리 매핑
 CHARACTER_VOICES = {
-    "뚜비": "21m00Tcm4TlvDq8ikWAM",   # Josh
-    "피코": "EXAVITQu4vr4xnSDxMaL",  # Rachel
-    "뽀요": "MF3mGyEYCl7XYWbV9V6O",   # Bella
+    "뚜비": "21m00Tcm4TlvDq8ikWAM",
+    "피코": "EXAVITQu4vr4xnSDxMaL",
+    "뽀요": "MF3mGyEYCl7XYWbV9V6O"
 }
 
 def log_error(message):
@@ -90,13 +90,13 @@ def tts_generate(character, texts):
 
     return f"https://{USERNAME}.pythonanywhere.com/{filename}"
 
-def create_notion_card(title, voice_links):
+def create_notion_card(title, full_script, voice_links):
     timestamp = datetime.now().isoformat()
     notion.pages.create(
         parent={"database_id": NOTION_DB_ID},
         properties={
             "에피소드 제목": {"title": [{"text": {"content": title}}]},
-            "대본": {"rich_text": [{"text": {"content": "자동 생성됨"}}]},
+            "대본": {"rich_text": [{"text": {"content": full_script}}]},
             "상태": {"select": {"name": "대본 생성됨"}},
             "생성 날짜": {"date": {"start": timestamp}},
             "음성 링크": {"url": voice_links[0] if voice_links else None}
@@ -116,7 +116,7 @@ def main():
             voice_links.append(url)
 
     print("▶ 노션 카드 생성 중...")
-    create_notion_card(title, voice_links)
+    create_notion_card(title, script, voice_links)
     print("✅ 완료! 자동 생성된 카드가 노션에 추가됐습니다.")
 
 if __name__ == "__main__":
