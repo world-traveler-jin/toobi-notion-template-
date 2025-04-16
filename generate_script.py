@@ -12,15 +12,15 @@ NOTION_TOKEN = os.getenv("NOTION_TOKEN")
 DATABASE_ID = os.getenv("NOTION_DATABASE_ID")
 
 prompt = (
-    "아이들을 위한 에피소드 제목과 캐릭터별 대사를 작성해줘. "
-    "형식은 다음과 같이:
-"
-    "제목: ...
-"
-    "대본:
+    """
+아이들을 위한 에피소드 제목과 캐릭터별 대사를 작성해줘.
+형식은 다음과 같이:
+제목: ...
+대본:
 뚜비: ...
 피코: ...
-뽀요: ..."
+뽀요: ...
+"""
 )
 
 response = openai.ChatCompletion.create(
