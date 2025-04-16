@@ -24,7 +24,7 @@ prompt = (
 )
 
 response = openai.ChatCompletion.create(
-    model="gpt-4",
+    model="gpt-3.5-turbo",
     messages=[
         {"role": "system", "content": "너는 어린이 애니메이션 시나리오 작가야."},
         {"role": "user", "content": prompt}
